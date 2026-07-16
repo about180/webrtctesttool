@@ -74,13 +74,70 @@ npm start
 高低水位之間（`bufferedAmountLowThreshold` + `bufferedamountlow` 事件），
 才能吃滿鏈路又不讓送出緩衝無限膨脹。
 
-## 部署注意事項（NAT / STUN / TURN）
+## 部署
 
-- 前後端都設定了公用 STUN（`stun:stun.l.google.com:19302`）。
-- 伺服器若有**公開 IP**，其 host / server-reflexive candidate 通常可直接連通。
-- 若伺服器位於對稱式 NAT 後方而無法建立連線，需要自備 **TURN** 伺服器
-  （例如 coturn），並把它加進 `server/signaling.js` 與 `public/app.js` 的 `iceServers`。
-- 正式環境請以 **HTTPS** 提供頁面；此時前端會自動改用 `wss://` 連訊令伺服器。
+### 1. 伺服器端
+
+需要一台有公開 IP（或經反向代理可達）的機器、Node.js 18+。
+
+```bash
+git clone <repo-url> && cd webrtctesttool
+git checkout claude/iperf-web-p59194
+npm install
+PORT=3000 node server/index.js
+```
+
+正式環境建議用行程管理器常駐（systemd / pm2）。
+
+### 2. 環境變數（部署用設定）
+
+所有 WebRTC / 網路設定都用環境變數控制，不必改程式碼：
+
+| 變數 | 說明 | 範例 |
+|------|------|------|
+| `PORT` | HTTP / WebSocket 監聽埠 | `3000` |
+| `PUBLIC_IP` | 伺服器對外可達的公開 IP。雲端 VM 多半是 1:1 NAT（內網只看得到私有 IP），設了才會把公開 IP 當成 host candidate 廣告出去 | `203.0.113.10` |
+| `ICE_PORT_MIN` / `ICE_PORT_MAX` | 把 ICE 用的 UDP 埠固定在一個範圍，方便開防火牆（兩個要一起設） | `40000` / `40100` |
+| `STUN_URL` | 自訂 STUN（預設 Google 公用） | `stun:stun.l.google.com:19302` |
+| `TURN_URL` / `TURN_USERNAME` / `TURN_CREDENTIAL` | 對稱式 NAT 後方的用戶端需要 TURN 中繼時設定 | `turn:turn.example.com:3478` |
+
+瀏覽器端會自動向伺服器的 `GET /config` 取得同一份 `iceServers`（含 TURN），
+所以 **TURN 帳密只設在伺服器**、不必改前端。
+
+範例（雲端 VM，固定 UDP 埠 + 公開 IP）：
+
+```bash
+PORT=3000 PUBLIC_IP=203.0.113.10 ICE_PORT_MIN=40000 ICE_PORT_MAX=40100 \
+  node server/index.js
+```
+
+### 3. 防火牆 / 安全群組
+
+- **TCP**：對外開放 HTTP/WebSocket 埠（`PORT`，或經反向代理的 80/443）。
+- **UDP**：開放 `ICE_PORT_MIN`–`ICE_PORT_MAX`（若未設則需允許臨時 UDP 埠）。
+  WebRTC 的實際資料走這些 UDP 埠，沒開會連不上。
+
+### 4. HTTPS（建議）
+
+用 nginx / Caddy 之類的反向代理掛上 TLS，同時代理 HTTP 與 `/ws`（WebSocket 需
+`Upgrade` header）。頁面走 HTTPS 時，前端會自動改用 `wss://` 連訊令伺服器。
+
+Caddy 範例：
+
+```
+測試網域.example.com {
+    reverse_proxy 127.0.0.1:3000
+}
+```
+
+### 5. 發起方（瀏覽器）
+
+使用者端**不需要安裝任何東西**：用現代瀏覽器（Chrome / Edge / Firefox / Safari，
+近幾年版本都支援 WebRTC）開啟你的網址即可（`https://測試網域.example.com` 或
+`http://伺服器IP:3000`），選好項目按「開始測試」。
+
+- 若企業防火牆封鎖 UDP 導致連不上，就需要走 **TURN**（可設定成 TCP/TLS 443 中繼）。
+- 建議正式環境走 HTTPS，避免部分瀏覽器對非安全來源的限制。
 
 ## 已知限制
 
@@ -97,7 +154,7 @@ webrtctesttool/
 │   ├── index.js       # http + express 靜態檔 + WebSocket 訊令掛載
 │   ├── signaling.js   # 每條連線的 werift peer 與 offer/answer/candidate 中繼
 │   ├── peer.js        # 伺服器端測試協定（收送資料塊、統計）
-│   └── config.js      # 共用常數（chunk 大小、水位、channel label）
+│   └── config.js      # 共用常數 + env 驅動的部署設定（ICE servers / 埠範圍 / 公開 IP）
 └── public/
     ├── index.html
     ├── app.js         # 瀏覽器 WebRTC、測試流程、canvas 折線圖

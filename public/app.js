@@ -120,12 +120,22 @@ function wsUrl() {
   return `${proto}://${location.host}/ws`;
 }
 
+async function fetchIceServers() {
+  try {
+    const r = await fetch('/config');
+    const cfg = await r.json();
+    if (cfg && Array.isArray(cfg.iceServers) && cfg.iceServers.length) return cfg.iceServers;
+  } catch (e) {
+    /* fall back below */
+  }
+  return [{ urls: 'stun:stun.l.google.com:19302' }];
+}
+
 function connect() {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     setConn('連線中…', 'connecting');
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-    });
+    const iceServers = await fetchIceServers();
+    const pc = new RTCPeerConnection({ iceServers });
     const ws = new WebSocket(wsUrl());
     state.pc = pc;
     state.ws = ws;

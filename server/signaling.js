@@ -2,6 +2,14 @@
 
 const { RTCPeerConnection } = require('werift');
 const { Session } = require('./peer');
+const { ICE_SERVERS, ICE_PORT_RANGE, PUBLIC_IP } = require('./config');
+
+function buildPeerConfig() {
+  const cfg = { iceServers: ICE_SERVERS };
+  if (ICE_PORT_RANGE) cfg.icePortRange = ICE_PORT_RANGE;
+  if (PUBLIC_IP) cfg.iceAdditionalHostAddresses = [PUBLIC_IP];
+  return cfg;
+}
 
 /**
  * Handle one signaling WebSocket connection.
@@ -15,9 +23,7 @@ function handleConnection(ws, id) {
   const log = (...a) => console.log(`[session ${id}]`, ...a);
   log('connected');
 
-  const pc = new RTCPeerConnection({
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
-  });
+  const pc = new RTCPeerConnection(buildPeerConfig());
   const session = new Session(log);
 
   const wsSend = (obj) => {
