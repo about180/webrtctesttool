@@ -1,0 +1,19 @@
+{
+  "name": "webrtctesttool",
+  "version": "1.0.0",
+  "description": "Web-based iperf-style network throughput/latency test over WebRTC DataChannel (browser ↔ server).",
+  "type": "commonjs",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "werift": "^0.23.0",
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}
