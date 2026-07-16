@@ -124,9 +124,11 @@ async function fetchIceServers() {
   try {
     const r = await fetch('/config');
     const cfg = await r.json();
-    if (cfg && Array.isArray(cfg.iceServers) && cfg.iceServers.length) return cfg.iceServers;
+    // The server is authoritative — an empty list is valid (LAN / offline
+    // mode: connect using host candidates only, no STUN/TURN).
+    if (cfg && Array.isArray(cfg.iceServers)) return cfg.iceServers;
   } catch (e) {
-    /* fall back below */
+    /* fall back below only if the request itself failed */
   }
   return [{ urls: 'stun:stun.l.google.com:19302' }];
 }

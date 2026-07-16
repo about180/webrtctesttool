@@ -5,6 +5,11 @@
 // TURN_URL / TURN_USERNAME / TURN_CREDENTIAL env vars for clients behind
 // symmetric NAT.
 function buildIceServers() {
+  // Air-gapped / same-LAN deployments need no STUN or TURN at all: both peers
+  // reach each other directly via host candidates. LAN_ONLY=1 returns an empty
+  // list so nothing on the internet is ever contacted.
+  if (/^(1|true|yes)$/i.test(process.env.LAN_ONLY || '')) return [];
+
   const servers = [{ urls: process.env.STUN_URL || 'stun:stun.l.google.com:19302' }];
   if (process.env.TURN_URL) {
     servers.push({

@@ -139,6 +139,37 @@ Caddy 範例：
 - 若企業防火牆封鎖 UDP 導致連不上，就需要走 **TURN**（可設定成 TCP/TLS 443 中繼）。
 - 建議正式環境走 HTTPS，避免部分瀏覽器對非安全來源的限制。
 
+## 地端 / 離線（air-gapped）安裝
+
+**可以完全離線執行**，而且同一區網內比公網部署更單純——因為兩端直接用 host
+candidate 互連，**根本不需要 STUN/TURN，不會連任何外部服務**。
+
+需要處理的只有兩件事：Node 執行環境與相依套件都得先帶進離線設備。
+
+1. **Node.js 執行環境**：離線設備要先裝好 Node 18+（把安裝檔一起帶進去）。
+
+2. **相依套件**（`npm install` 需要網路，離線機無法直接跑）——擇一：
+   - 在一台**有網路**的機器上 `npm install`，再把**整個資料夾（含 `node_modules/`）**
+     複製到離線設備即可（本專案相依為純 JS，無原生編譯，跨機複製沒問題）。
+   - 或用 npm 離線快取 / 私有 registry（`npm ci --offline`）。
+
+3. **關閉 STUN/TURN**：用 `LAN_ONLY=1` 啟動，`iceServers` 會是空的，
+   完全走 host candidate，不對外連線：
+
+   ```bash
+   LAN_ONLY=1 PORT=3000 node server/index.js
+   # 使用者瀏覽器開 http://<設備區網IP>:3000
+   ```
+
+4. **前端本來就自足**：無外部 CDN、無 web 字型、無外部 API，所有 HTML/CSS/JS
+   都由本機伺服器提供，離線可正常載入與繪圖。
+
+5. **HTTPS**：`RTCPeerConnection` / DataChannel 在非安全來源（`http://` 的區網 IP）
+   也能運作，離線 LAN 用 HTTP 即可；若要 HTTPS 需自備內部憑證。
+
+> 已實測：`LAN_ONLY=1` 時 `/config` 回傳空 `iceServers`，連線僅用 host candidate
+> 即建立成功、四項測試皆正常。
+
 ## 已知限制
 
 - `werift` 是純 JavaScript 的 SCTP / DTLS 實作，吞吐量會受 **CPU** 限制，
