@@ -298,10 +298,12 @@ async function testUpload(duration) {
   });
 
   sendCtrl({ t: 'begin', test: 'upload' });
-  await blast(state.data, duration * 1000);
-  sendCtrl({ t: 'end', test: 'upload' });
+  const sent = await blast(state.data, duration * 1000);
+  // Tell the server exactly how many bytes to expect so it can wait for the
+  // in-flight tail before computing the summary.
+  sendCtrl({ t: 'end', test: 'upload', bytes: sent });
 
-  const m = await Promise.race([summary, sleep(4000).then(() => null)]);
+  const m = await Promise.race([summary, sleep(6000).then(() => null)]);
   if (m) {
     $('upload-val').textContent = fmt(m.mbps);
     log(`upload: ${fmt(m.mbps)} Mbps (${fmt(m.bytes / 1e6)} MB in ${fmt(m.seconds)} s)`);
@@ -317,8 +319,9 @@ async function testUdp(duration) {
   let maxSeq = -1;
   let jitter = 0;
   let lastTransit = null;
-  const start = performance.now();
-  let lastTick = start;
+  let start = 0; // set on first packet
+  let last = 0;
+  let lastTick = 0;
   let bytesThisSec = 0;
 
   const done = new Promise((resolve) => {
@@ -347,6 +350,11 @@ async function testUdp(duration) {
     lastTransit = transit;
 
     const now = performance.now();
+    if (!start) {
+      start = now;
+      lastTick = now;
+    }
+    last = now;
     if (now - lastTick >= 1000) {
       const secs = (now - lastTick) / 1000;
       const rate = mbps(bytesThisSec, secs);
@@ -359,10 +367,10 @@ async function testUdp(duration) {
 
   sendCtrl({ t: 'start', test: 'udp', duration });
   const sent = await done;
-  await sleep(200); // let stragglers arrive
+  await sleep(300); // let unreliable-channel stragglers arrive
   state.udp.onmessage = null;
 
-  const seconds = (performance.now() - start) / 1000;
+  const seconds = start ? (last - start) / 1000 : 0;
   const rate = mbps(bytes, seconds);
   const loss = sent > 0 ? Math.max(0, (1 - received / sent) * 100) : 0;
   $('loss-val').textContent = fmt(loss);
@@ -378,10 +386,14 @@ function receiveThroughput(name, channel, duration, kick) {
   return new Promise((resolve) => {
     let bytes = 0;
     let bytesThisSec = 0;
-    const start = performance.now();
-    let lastTick = start;
+    let start = 0; // set on first byte (excludes signaling latency)
+    let last = 0;
+    let lastTick = 0;
+    let expected = null; // total bytes the server says it sent
+    let done = false;
 
     const tick = setInterval(() => {
+      if (!start) return;
       const now = performance.now();
       const secs = (now - lastTick) / 1000;
       const rate = mbps(bytesThisSec, secs);
@@ -391,21 +403,40 @@ function receiveThroughput(name, channel, duration, kick) {
       bytesThisSec = 0;
     }, 1000);
 
-    channel.onmessage = (ev) => {
-      const len = ev.data.byteLength || ev.data.length || 0;
-      bytes += len;
-      bytesThisSec += len;
-    };
-
-    onCtrlType(`done:${name}`, () => {
-      offCtrlType(`done:${name}`);
+    const finalize = () => {
+      if (done) return;
+      done = true;
       clearInterval(tick);
       channel.onmessage = null;
-      const seconds = (performance.now() - start) / 1000;
+      offCtrlType(`done:${name}`);
+      const seconds = (last - start) / 1000;
       const rate = mbps(bytes, seconds);
       $(`${name}-val`).textContent = fmt(rate);
       log(`${name}: ${fmt(rate)} Mbps (${fmt(bytes / 1e6)} MB in ${fmt(seconds)} s)`);
       resolve();
+    };
+
+    channel.onmessage = (ev) => {
+      const len = ev.data.byteLength || ev.data.length || 0;
+      const now = performance.now();
+      if (!start) {
+        start = now;
+        lastTick = now;
+      }
+      last = now;
+      bytes += len;
+      bytesThisSec += len;
+      // The 'done' marker can arrive before the last data bytes; finalize only
+      // once every reported byte has landed.
+      if (expected !== null && bytes >= expected) finalize();
+    };
+
+    onCtrlType(`done:${name}`, (m) => {
+      expected = typeof m.bytes === 'number' ? m.bytes : 0;
+      if (bytes >= expected) finalize();
+      // Safety net in case a byte count never quite matches (shouldn't happen
+      // on a reliable channel): finalize shortly after the marker.
+      else setTimeout(finalize, 3000);
     });
 
     kick();
@@ -446,3 +477,22 @@ async function runAll() {
 $('start').addEventListener('click', runAll);
 $('clear-log').addEventListener('click', () => ($('log').textContent = ''));
 drawChart();
+
+// Diagnostics hook: expose the active PeerConnection's selected ICE path so
+// you can confirm which candidate pair (host / srflx / relay, and address) the
+// test actually ran over. Handy for debugging LAN vs relay connectivity.
+window.__webrtctest = {
+  async selectedPath() {
+    if (!state.pc) return null;
+    const stats = await state.pc.getStats();
+    let pair = null;
+    stats.forEach((r) => {
+      if (r.type === 'candidate-pair' && (r.selected || r.state === 'succeeded' || r.nominated)) pair = r;
+    });
+    if (!pair) return null;
+    const local = stats.get(pair.localCandidateId);
+    const remote = stats.get(pair.remoteCandidateId);
+    const fmtC = (c) => (c ? `${c.candidateType} ${c.address || c.ip}:${c.port}/${c.protocol}` : '?');
+    return { local: fmtC(local), remote: fmtC(remote), state: pair.state };
+  },
+};
