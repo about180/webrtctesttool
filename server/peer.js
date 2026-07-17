@@ -207,8 +207,9 @@ class Session {
 }
 
 function clampDuration(sec) {
-  const n = Number(sec) || 10;
-  return Math.min(60, Math.max(1, n));
+  const n = Number(sec) || 30;
+  // Upper bound matches the longest UI option (5 minutes).
+  return Math.min(300, Math.max(1, n));
 }
 
 function round(n) {
