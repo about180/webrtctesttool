@@ -12,11 +12,13 @@
   },
   "dependencies": {
     "express": "^4.19.2",
+    "ip": "file:./vendor/ip",
     "werift": "^0.23.0",
     "ws": "^8.18.0"
   },
   "overrides": {
-    "@peculiar/x509": "1.14.0"
+    "@peculiar/x509": "1.14.0",
+    "ip": "$ip"
   },
   "license": "MIT"
 }

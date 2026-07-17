@@ -1,0 +1,7 @@
+{
+  "name": "ip",
+  "version": "2.0.1-safe.1",
+  "description": "Trimmed vendored copy of node-ip with the unmaintained, SSRF-flagged isPublic/isPrivate helpers removed (GHSA-2p57-rm9w-gvfp). werift only uses toBuffer/toString/isV4Format/isLoopback.",
+  "main": "lib/ip.js",
+  "license": "MIT"
+}

@@ -82,6 +82,27 @@ override 可保留（無害）或移除皆可。werift 的 WebRTC DTLS 憑證用
 > 離線 / `npm ci` 部署務必連同 `package-lock.json` 一起帶走，才會鎖到正確的
 > `@peculiar/x509@1.14.0`。
 
+## 安全性（npm audit）
+
+`npm audit` **回報 0 個弱點**。
+
+過程中處理過一個傳遞相依的告警：`ip` 套件（被 werift → werift-ice 使用）有一個
+高風險 SSRF 分類錯誤告警 [GHSA-2p57-rm9w-gvfp](https://github.com/advisories/GHSA-2p57-rm9w-gvfp)，
+且上游**無修補版本**（套件已停止維護）。
+
+- **實際風險**：該告警只影響 `ip.isPublic()` / `ip.isPrivate()` 這兩個函式，且需要
+  應用程式用它們來過濾使用者可控的對外請求（SSRF）。werift 只用到 `ip` 的
+  `toBuffer` / `toString` / `isV4Format` / `isLoopback`（STUN 位址編碼與本機介面過濾），
+  **從未呼叫 `isPublic`/`isPrivate`**；本工具也沒有 SSRF 的攻擊面。故此告警在本專案
+  **不可觸發**。
+- **處理方式**：為了讓 `npm audit` 乾淨且徹底移除受影響程式碼，`vendor/ip/` 放了一份
+  `ip` 的精簡副本（保留 werift 用到的函式，**移除** `isPublic`/`isPrivate`），並在
+  `package.json` 用 `overrides` + `"ip": "file:./vendor/ip"` 讓相依改指向它。已實測
+  ICE / 四項測試在 Node 16.16.0 上（含跨網卡 LAN 路徑）皆正常。
+
+> 若日後 werift 或 `ip` 上游有了修補版本，可移除 `vendor/ip/` 與相關 `overrides`
+> 改回官方套件。
+
 ## 測試項目
 
 - **延遲 (Latency)**：連續 ping/pong，取 RTT 的 min / avg / max 與 jitter。
