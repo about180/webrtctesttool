@@ -8,12 +8,15 @@
     "start": "node server/index.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=16.16.0"
   },
   "dependencies": {
     "express": "^4.19.2",
     "werift": "^0.23.0",
     "ws": "^8.18.0"
+  },
+  "overrides": {
+    "@peculiar/x509": "1.14.0"
   },
   "license": "MIT"
 }
