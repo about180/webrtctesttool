@@ -113,7 +113,7 @@ class Session {
         break;
 
       case 'end':
-        if (m.test === 'upload') this.endUpload();
+        if (m.test === 'upload') this.endUpload(m.bytes);
         break;
 
       default:
@@ -126,14 +126,19 @@ class Session {
   async runDownload(durationSec) {
     const ms = clampDuration(durationSec) * 1000;
     this.log(`download: sending for ${ms / 1000}s`);
-    await blast(this.data, ms);
-    this.send({ t: 'done', test: 'download' });
+    const sent = await blast(this.data, ms);
+    // Report the exact byte count so the browser can wait for the in-flight
+    // tail (this 'done' travels on the ctrl channel and may overtake the last
+    // data-channel bytes).
+    this.send({ t: 'done', test: 'download', bytes: sent });
   }
 
   // ---- upload: browser -> server on the reliable data channel ------------
 
   beginUpload() {
-    this.upload = { bytes: 0, start: Date.now(), lastBytes: 0, lastTs: Date.now() };
+    // start / lastArrival are set on the first byte so the measured window is
+    // the actual transfer time, not inflated by signaling latency.
+    this.upload = { bytes: 0, start: 0, lastArrival: 0, lastBytes: 0, lastTs: Date.now() };
     this.log('upload: receiving');
     this.upload.timer = setInterval(() => {
       const u = this.upload;
@@ -148,15 +153,27 @@ class Session {
   }
 
   onDataBytes(msg) {
-    if (!this.upload) return; // only counted during an active upload test
-    this.upload.bytes += msg.length || msg.byteLength || 0;
+    const u = this.upload;
+    if (!u) return; // only counted during an active upload test
+    const now = Date.now();
+    if (u.start === 0) u.start = now;
+    u.lastArrival = now;
+    u.bytes += msg.length || msg.byteLength || 0;
   }
 
-  endUpload() {
+  async endUpload(expectedBytes) {
     const u = this.upload;
     if (!u) return;
+    // The 'end' marker (ctrl channel) can arrive before the last data-channel
+    // bytes. Wait until every byte the sender reported has landed (bounded).
+    if (expectedBytes > 0) {
+      const deadline = Date.now() + 4000;
+      while (u.bytes < expectedBytes && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    }
     clearInterval(u.timer);
-    const seconds = (Date.now() - u.start) / 1000;
+    const seconds = (u.lastArrival - u.start) / 1000;
     const mbps = seconds > 0 ? (u.bytes * 8) / seconds / 1e6 : 0;
     this.send({
       t: 'summary',
@@ -165,7 +182,10 @@ class Session {
       bytes: u.bytes,
       seconds: round(seconds),
     });
-    this.log(`upload: ${round(mbps)} Mbps over ${round(seconds)}s`);
+    this.log(
+      `upload: ${round(mbps)} Mbps over ${round(seconds)}s ` +
+        `(${u.bytes}/${expectedBytes || '?'} bytes)`
+    );
     this.upload = null;
   }
 
