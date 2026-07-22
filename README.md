@@ -26,13 +26,18 @@
 ## 架構
 
 ```
-瀏覽器 (public/app.js)                Node 服務 (server/)
+瀏覽器 (public/app.jsx, React)          Node 服務 (server/)
   RTCPeerConnection  ──── WebSocket 訊令 ────  werift RTCPeerConnection
   DataChannel × 3    ═════ WebRTC / SCTP ═════  DataChannel × 3
   (ctrl / data / udp)                          (ctrl / data / udp)
 ```
 
-- **前端**：純 HTML / CSS / JS，無打包工具、無外部 CDN；折線圖用原生 `<canvas>` 手繪。
+- **前端**：**React 18**，但**零建置**——不需要 npm/webpack/Vite 產生任何東西。
+  `public/vendor/` 放了本地 vendor 的 React、ReactDOM（UMD build）與
+  [Babel standalone](https://babeljs.io/docs/babel-standalone)；瀏覽器載入頁面時由
+  Babel 即時把 `app.jsx` 轉譯成一般 JS 再執行。**無外部 CDN**、無需連網、部署方式與
+  改版前完全一樣（`git pull` 就能跑）。折線圖仍是原生 `<canvas>` 手繪（不依賴圖表套件）。
+  細節見下方「前端技術棧（React，零建置）」。
 - **後端**：單一 Node.js 服務，同時負責靜態網頁、WebSocket 訊令（signaling）、以及
   用 [`werift`](https://github.com/shinyoshiaki/werift-webrtc)（純 TypeScript 的 WebRTC 實作，
   **無原生編譯依賴**）擔任伺服器端的固定 WebRTC peer。
@@ -81,6 +86,34 @@ override 可保留（無害）或移除皆可。werift 的 WebRTC DTLS 憑證用
 
 > 離線 / `npm ci` 部署務必連同 `package-lock.json` 一起帶走，才會鎖到正確的
 > `@peculiar/x509@1.14.0`。
+
+## 前端技術棧（React，零建置）
+
+前端用 **React 18**，但**不需要任何建置流程**（沒有 webpack/Vite/npm build）：
+
+- `public/vendor/react.production.min.js`、`react-dom.production.min.js`：
+  React 的官方 **UMD build**（`<script>` 標籤可直接用的版本）。**只支援到 React
+  18**——React 19 拿掉了 UMD build，所以刻意釘在 18。
+- `public/vendor/babel.min.js`：[Babel standalone](https://babeljs.io/docs/babel-standalone)，
+  在瀏覽器**載入頁面當下**即時把 `public/app.jsx` 的 JSX 轉譯成一般 JS 再執行
+  （見 `index.html` 裡的小段 bootstrap script：`fetch('app.jsx')` →
+  `Babel.transform(..., { presets: [['react', { runtime: 'classic' }]] })` →
+  建立 `<script>` 執行）。**刻意指定 `runtime: 'classic'`**：Babel 的預設
+  `automatic` runtime 會產生 `import ... from "react/jsx-runtime"`，但這裡沒有
+  模組載入器（純 `<script>` 標籤），會直接噴錯。
+- 三個檔案都在 `public/vendor/` 下**本地 vendor**、不連外部 CDN，離線環境一樣可用；
+  版本與授權記錄在 `public/vendor/README.md`。
+
+**這代表什麼**：
+- 部署方式跟改版前完全一樣——`git pull` → `npm install` → `npm start`，
+  伺服器端不需要多做任何事，Node 16.16.0 相容性、`LAN_ONLY` 離線模式、
+  npm audit 清零都不受影響。
+- 唯一的取捨：React 官方**不建議**在正式環境用瀏覽器內 JSX 轉譯（有額外的載入/
+  轉譯開銷），但以這個工具的規模（單頁、極少互動）來說影響可忽略；已實測頁面
+  載入到可互動的時間與改版前無感差異。
+- 若之後想換成正式建置流程（Vite 等）：build 這個動作可以在**另一台有 Node 18+
+  的機器**上做，產出的靜態檔案（HTML/JS/CSS）部署到 Node 16 伺服器上跟現在一樣
+  用 `express.static` 提供即可，伺服器端完全不受影響。
 
 ## 安全性（npm audit）
 
@@ -228,7 +261,8 @@ webrtctesttool/
 │   ├── peer.js        # 伺服器端測試協定（收送資料塊、統計）
 │   └── config.js      # 共用常數 + env 驅動的部署設定（ICE servers / 埠範圍 / 公開 IP）
 └── public/
-    ├── index.html
-    ├── app.js         # 瀏覽器 WebRTC、測試流程、canvas 折線圖
-    └── styles.css
+    ├── index.html     # 掛載點 <div id="root"> + Babel 轉譯 bootstrap
+    ├── app.jsx        # React 元件、WebRTC、測試流程、canvas 折線圖
+    ├── styles.css
+    └── vendor/        # 本地 vendor 的 React / ReactDOM / Babel standalone
 ```
