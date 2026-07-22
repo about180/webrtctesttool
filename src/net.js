@@ -1,6 +1,8 @@
-'use strict';
-
-const { useState, useRef, useEffect } = React;
+// WebRTC signaling + the throughput/latency/loss test protocol + canvas chart.
+//
+// This is the same logic that was verified end-to-end before the React
+// migration; it operates on an explicit `ctx` object (WebRTC objects + React
+// setState callbacks) so the measurement code stays free of any UI framework.
 
 // Must match server/config.js
 const CHUNK_SIZE = 16 * 1024;
@@ -9,7 +11,7 @@ const LOW_WATER = 256 * 1024;
 const UDP_HEADER_SIZE = 12;
 const CHUNK = new Uint8Array(CHUNK_SIZE);
 
-const COLORS = { download: '#4f9dff', upload: '#35d0a5', udp: '#f2b03d' };
+export const COLORS = { download: '#4f9dff', upload: '#35d0a5', udp: '#f2b03d' };
 
 function mbps(bytes, seconds) {
   return seconds > 0 ? (bytes * 8) / seconds / 1e6 : 0;
@@ -27,9 +29,9 @@ function niceMax(v) {
   return step * pow;
 }
 
-// ---- chart: plain canvas drawing, invoked from a useEffect on point changes ----
+// ---- chart: plain canvas drawing ------------------------------------------
 
-function drawChart(canvas, points) {
+export function drawChart(canvas, points) {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const W = canvas.width;
@@ -85,10 +87,6 @@ function drawChart(canvas, points) {
 }
 
 // ---- WebRTC / signaling ---------------------------------------------------
-// These operate on an explicit `ctx` object (WebRTC objects + React setState
-// callbacks) rather than a module-level singleton, so the logic is unchanged
-// from the pre-React version but reports state through React instead of the
-// DOM directly.
 
 function wsUrl() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -109,53 +107,54 @@ async function fetchIceServers() {
 }
 
 function connect(ctx) {
-  return new Promise(async (resolve, reject) => {
+  return new Promise((resolve, reject) => {
     ctx.setConn('連線中…', 'connecting');
-    const iceServers = await fetchIceServers();
-    const pc = new RTCPeerConnection({ iceServers });
-    const ws = new WebSocket(wsUrl());
-    ctx.pc = pc;
-    ctx.ws = ws;
+    fetchIceServers().then((iceServers) => {
+      const pc = new RTCPeerConnection({ iceServers });
+      const ws = new WebSocket(wsUrl());
+      ctx.pc = pc;
+      ctx.ws = ws;
 
-    // Browser is the initiator: create the channels up front.
-    ctx.ctrl = pc.createDataChannel('ctrl', { ordered: true });
-    ctx.data = pc.createDataChannel('data', { ordered: true });
-    ctx.udp = pc.createDataChannel('udp', { ordered: false, maxRetransmits: 0 });
-    for (const ch of [ctx.ctrl, ctx.data, ctx.udp]) ch.binaryType = 'arraybuffer';
+      // Browser is the initiator: create the channels up front.
+      ctx.ctrl = pc.createDataChannel('ctrl', { ordered: true });
+      ctx.data = pc.createDataChannel('data', { ordered: true });
+      ctx.udp = pc.createDataChannel('udp', { ordered: false, maxRetransmits: 0 });
+      for (const ch of [ctx.ctrl, ctx.data, ctx.udp]) ch.binaryType = 'arraybuffer';
 
-    ctx.ctrl.onmessage = (ev) => onCtrl(ctx, ev.data);
+      ctx.ctrl.onmessage = (ev) => onCtrl(ctx, ev.data);
 
-    pc.onicecandidate = (ev) => {
-      if (ev.candidate) ws.send(JSON.stringify({ type: 'candidate', candidate: ev.candidate }));
-    };
-    pc.onconnectionstatechange = () => {
-      const s = pc.connectionState;
-      if (s === 'connected') ctx.setConn('已連線', 'connected');
-      else if (s === 'failed' || s === 'disconnected') ctx.setConn('連線失敗', 'failed');
-    };
+      pc.onicecandidate = (ev) => {
+        if (ev.candidate) ws.send(JSON.stringify({ type: 'candidate', candidate: ev.candidate }));
+      };
+      pc.onconnectionstatechange = () => {
+        const s = pc.connectionState;
+        if (s === 'connected') ctx.setConn('已連線', 'connected');
+        else if (s === 'failed' || s === 'disconnected') ctx.setConn('連線失敗', 'failed');
+      };
 
-    ws.onopen = async () => {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
-    };
-    ws.onmessage = async (ev) => {
-      const msg = JSON.parse(ev.data);
-      if (msg.type === 'answer') {
-        await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
-      } else if (msg.type === 'candidate' && msg.candidate) {
-        try {
-          await pc.addIceCandidate(msg.candidate);
-        } catch (e) {
-          /* ignore late candidates */
+      ws.onopen = async () => {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        ws.send(JSON.stringify({ type: 'offer', sdp: offer.sdp }));
+      };
+      ws.onmessage = async (ev) => {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'answer') {
+          await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp });
+        } else if (msg.type === 'candidate' && msg.candidate) {
+          try {
+            await pc.addIceCandidate(msg.candidate);
+          } catch (e) {
+            /* ignore late candidates */
+          }
         }
-      }
-    };
-    ws.onerror = () => reject(new Error('signaling websocket error'));
+      };
+      ws.onerror = () => reject(new Error('signaling websocket error'));
 
-    // Resolve when the control channel is usable.
-    ctx.ctrl.onopen = () => resolve();
-    setTimeout(() => reject(new Error('連線逾時')), 15000);
+      // Resolve when the control channel is usable.
+      ctx.ctrl.onopen = () => resolve();
+      setTimeout(() => reject(new Error('連線逾時')), 15000);
+    });
   });
 }
 
@@ -211,7 +210,7 @@ function blast(channel, durationMs, fill) {
   });
 }
 
-// ---- tests ------------------------------------------------------------
+// ---- tests ----------------------------------------------------------------
 
 async function testLatency(ctx) {
   ctx.setPhase('測試延遲…');
@@ -420,9 +419,9 @@ function receiveThroughput(ctx, name, channel, duration, kick) {
   });
 }
 
-// ---- orchestration ---------------------------------------------------
+// ---- orchestration --------------------------------------------------------
 
-async function runAll(ctx, duration, tests) {
+export async function runAll(ctx, duration, tests) {
   ctx.setRunning(true);
   ctx.resetChart();
   ctx.resetMetrics();
@@ -444,193 +443,18 @@ async function runAll(ctx, duration, tests) {
   }
 }
 
-// ---- React UI --------------------------------------------------------
-
-const DURATIONS = [
-  { value: 30, label: '30 秒' },
-  { value: 60, label: '1 分鐘' },
-  { value: 180, label: '3 分鐘' },
-  { value: 300, label: '5 分鐘' },
-];
-
-const EMPTY_METRICS = { download: '—', upload: '—', latency: '—', jitter: '—', loss: '—' };
-
-function App() {
-  const [duration, setDuration] = useState(30);
-  const [tests, setTests] = useState({ latency: true, download: true, upload: true, udp: true });
-  const [running, setRunning] = useState(false);
-  const [conn, setConnState] = useState({ text: '未連線', cls: '' });
-  const [phase, setPhase] = useState('');
-  const [metrics, setMetrics] = useState(EMPTY_METRICS);
-  const [logLines, setLogLines] = useState([]);
-  const [chartPoints, setChartPoints] = useState([]);
-
-  const canvasRef = useRef(null);
-  const logRef = useRef(null);
-  const ctxRef = useRef(null);
-
-  if (!ctxRef.current) {
-    ctxRef.current = {
-      pc: null,
-      ws: null,
-      ctrl: null,
-      data: null,
-      udp: null,
-      ctrlWaiters: {},
-      setConn: (text, cls) => setConnState({ text, cls: cls || '' }),
-      setPhase,
-      setMetric: (key, val) => setMetrics((m) => ({ ...m, [key]: val })),
-      pushLog: (line) => setLogLines((ls) => ls.concat(line)),
-      resetChart: () => setChartPoints([]),
-      pushPoint: (test, val) => setChartPoints((pts) => pts.concat({ test, mbps: val })),
-      resetMetrics: () => setMetrics(EMPTY_METRICS),
-      setRunning,
-    };
-
-    // Diagnostics hook: expose the active PeerConnection's selected ICE path
-    // so you can confirm which candidate pair (host / srflx / relay, and
-    // address) the test actually ran over. Handy for LAN-vs-relay debugging.
-    window.__webrtctest = {
-      async selectedPath() {
-        const c = ctxRef.current;
-        if (!c.pc) return null;
-        const stats = await c.pc.getStats();
-        let pair = null;
-        stats.forEach((r) => {
-          if (r.type === 'candidate-pair' && (r.selected || r.state === 'succeeded' || r.nominated)) pair = r;
-        });
-        if (!pair) return null;
-        const local = stats.get(pair.localCandidateId);
-        const remote = stats.get(pair.remoteCandidateId);
-        const fmtC = (cand) => (cand ? `${cand.candidateType} ${cand.address || cand.ip}:${cand.port}/${cand.protocol}` : '?');
-        return { local: fmtC(local), remote: fmtC(remote), state: pair.state };
-      },
-    };
-  }
-
-  useEffect(() => {
-    drawChart(canvasRef.current, chartPoints);
-  }, [chartPoints]);
-
-  useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
-  }, [logLines]);
-
-  const handleStart = () => {
-    runAll(ctxRef.current, duration, tests);
-  };
-  const toggleTest = (key) => setTests((t) => ({ ...t, [key]: !t[key] }));
-
-  return (
-    <main>
-      <header>
-        <h1>WebRTC 網路測試工具</h1>
-        <p className="subtitle">
-          瀏覽器 ↔ 伺服器的 iperf 式吞吐量 / 延遲測試，走 WebRTC DataChannel。
-        </p>
-      </header>
-
-      <section className="controls">
-        <div className="row">
-          <label>
-            測試時長
-            <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              {DURATIONS.map((d) => (
-                <option key={d.value} value={d.value}>
-                  {d.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="tests">
-            測試項目
-            <span className="checks">
-              <label>
-                <input type="checkbox" checked={tests.latency} onChange={() => toggleTest('latency')} /> 延遲
-              </label>
-              <label>
-                <input type="checkbox" checked={tests.download} onChange={() => toggleTest('download')} /> 下載
-              </label>
-              <label>
-                <input type="checkbox" checked={tests.upload} onChange={() => toggleTest('upload')} /> 上傳
-              </label>
-              <label>
-                <input type="checkbox" checked={tests.udp} onChange={() => toggleTest('udp')} /> UDP 丟包
-              </label>
-            </span>
-          </label>
-          <button disabled={running} onClick={handleStart}>
-            開始測試
-          </button>
-        </div>
-        <div className="status">
-          <span>連線狀態：</span>
-          <span className={'badge' + (conn.cls ? ' ' + conn.cls : '')}>{conn.text}</span>
-          <span className="phase">{phase}</span>
-        </div>
-      </section>
-
-      <section className="results">
-        <div className="metric">
-          <div className="metric-label">下載</div>
-          <div className="metric-value">
-            <span>{metrics.download}</span> <small>Mbps</small>
-          </div>
-        </div>
-        <div className="metric">
-          <div className="metric-label">上傳</div>
-          <div className="metric-value">
-            <span>{metrics.upload}</span> <small>Mbps</small>
-          </div>
-        </div>
-        <div className="metric">
-          <div className="metric-label">延遲 (RTT)</div>
-          <div className="metric-value">
-            <span>{metrics.latency}</span> <small>ms</small>
-          </div>
-        </div>
-        <div className="metric">
-          <div className="metric-label">Jitter</div>
-          <div className="metric-value">
-            <span>{metrics.jitter}</span> <small>ms</small>
-          </div>
-        </div>
-        <div className="metric">
-          <div className="metric-label">UDP 丟包</div>
-          <div className="metric-value">
-            <span>{metrics.loss}</span> <small>%</small>
-          </div>
-        </div>
-      </section>
-
-      <section className="chart-wrap">
-        <canvas ref={canvasRef} width={900} height={320}></canvas>
-      </section>
-
-      <section className="log-wrap">
-        <div className="log-head">
-          <span>每秒統計（模仿 iperf）</span>
-          <button className="ghost" onClick={() => setLogLines([])}>
-            清除
-          </button>
-        </div>
-        <pre ref={logRef}>{logLines.join('\n')}</pre>
-      </section>
-
-      <footer>
-        <details>
-          <summary>為什麼不是「真的」iperf？</summary>
-          <p>
-            瀏覽器沙箱不允許網頁存取原始 TCP/UDP socket，所以無法在頁面裡執行原生
-            <code>iperf</code>/<code>iperf3</code> 執行檔（即使編成 WebAssembly 也拿不到 socket）。
-            這個工具改用 <strong>WebRTC DataChannel</strong>（SCTP over DTLS over UDP）在 你的瀏覽器與伺服器之間傳資料，量測結果反映的是「你這台瀏覽器到伺服器」的真實連線。
-            下載/上傳走可靠、有序的 channel（類似 iperf 的 TCP 模式）；UDP 丟包測試走 不可靠、免重傳的 channel（類似 iperf 的 UDP 模式）。
-          </p>
-        </details>
-      </footer>
-    </main>
-  );
+// Diagnostics: the selected ICE candidate pair (host / srflx / relay + address)
+// the test actually ran over. Useful for debugging LAN vs relay connectivity.
+export async function selectedPath(pc) {
+  if (!pc) return null;
+  const stats = await pc.getStats();
+  let pair = null;
+  stats.forEach((r) => {
+    if (r.type === 'candidate-pair' && (r.selected || r.state === 'succeeded' || r.nominated)) pair = r;
+  });
+  if (!pair) return null;
+  const local = stats.get(pair.localCandidateId);
+  const remote = stats.get(pair.remoteCandidateId);
+  const fmtC = (c) => (c ? `${c.candidateType} ${c.address || c.ip}:${c.port}/${c.protocol}` : '?');
+  return { local: fmtC(local), remote: fmtC(remote), state: pair.state };
 }
-
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);

@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
 const express = require('express');
 const { WebSocketServer } = require('ws');
@@ -15,7 +16,16 @@ const app = express();
 // to hand them over — use short-lived TURN credentials in production.)
 app.get('/config', (req, res) => res.json({ iceServers: ICE_SERVERS }));
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
+// Serve the Vite build output. Run `npm run build` first (or copy a prebuilt
+// dist/ over, e.g. for an offline Node 16 device — see README).
+const DIST = path.join(__dirname, '..', 'dist');
+if (!fs.existsSync(path.join(DIST, 'index.html'))) {
+  console.warn(
+    '[warn] dist/ not found — run `npm run build` first ' +
+      '(or copy a prebuilt dist/ here). The API/WebSocket endpoints still work.'
+  );
+}
+app.use(express.static(DIST));
 
 const server = http.createServer(app);
 
