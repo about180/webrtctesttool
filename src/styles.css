@@ -138,7 +138,7 @@ canvas { width: 100%; height: auto; display: block; }
   color: var(--muted);
   font-size: 0.85rem;
 }
-#log {
+.log-wrap pre {
   margin: 0;
   max-height: 220px;
   overflow-y: auto;
