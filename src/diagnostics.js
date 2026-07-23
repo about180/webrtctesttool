@@ -28,6 +28,43 @@ export function waitIceGatheringComplete(pc, timeoutMs = 5000) {
   });
 }
 
+// Probe every configured STUN server on a *dedicated* RTCPeerConnection that
+// connects to no peer. This matters: the main test connection completes its
+// host-host candidate pair almost instantly (especially on a LAN), and the
+// browser then curtails STUN gathering — so reading srflx off the main
+// connection is unreliable/incomplete. A gather-only connection has nothing to
+// connect to, so gathering runs fully and queries every STUN server. All
+// servers share the same local candidate base here, which is exactly what
+// makes the mapped-port comparison a valid Cone-vs-Symmetric signal.
+export async function gatherStunBindings(iceServers, timeoutMs = 5000) {
+  const stunServers = (iceServers || []).filter((s) => String(s.urls).startsWith('stun:'));
+  if (stunServers.length === 0) return { srflx: [], hostAddresses: new Set(), errors: [], stunUrls: [] };
+
+  const pc = new RTCPeerConnection({ iceServers: stunServers });
+  const errors = [];
+  pc.addEventListener('icecandidateerror', (e) => errors.push({ url: e.url, errorCode: e.errorCode }));
+  try {
+    pc.createDataChannel('stun-probe'); // an m-line so gathering starts
+    await pc.setLocalDescription(await pc.createOffer());
+    await waitIceGatheringComplete(pc, timeoutMs);
+
+    const stats = await pc.getStats();
+    const srflx = [];
+    const hostAddresses = new Set();
+    stats.forEach((r) => {
+      if (r.type !== 'local-candidate') return;
+      if (r.candidateType === 'srflx' && r.url) {
+        srflx.push({ url: r.url, address: r.address, port: r.port });
+      } else if (r.candidateType === 'host' && r.address) {
+        hostAddresses.add(r.address);
+      }
+    });
+    return { srflx, hostAddresses, errors, stunUrls: stunServers.map((s) => s.urls) };
+  } finally {
+    try { pc.close(); } catch (e) { /* ignore */ }
+  }
+}
+
 function normalizeCandidate(r) {
   return {
     id: r.id,
@@ -46,48 +83,63 @@ function normalizeCandidate(r) {
   };
 }
 
+// icecandidateerror.errorCode >= 700 means no STUN response was received at all
+// (timeout / unreachable); 300–699 means the server *did* reply, just with an
+// error. So a >=700 code is the signal that a server genuinely didn't answer.
+const STUN_NO_RESPONSE_CODE = 700;
+
 // Approximate NAT-type classification. This is NOT the full RFC 3489
 // Full/Restricted/Port-Restricted Cone vs Symmetric taxonomy — that requires
 // a STUN server supporting CHANGE-REQUEST (RFC 5780), which public STUN
 // servers no longer offer, and a browser can't send raw STUN packets to a
-// self-hosted one anyway. Instead this compares the externally-mapped port
-// seen across >=2 distinct STUN servers.
+// self-hosted one anyway. Instead it uses ONE RTCPeerConnection carrying every
+// configured STUN server (so all queries share the same local candidate base,
+// which is what makes the comparison valid) and compares the externally-mapped
+// port each server reports.
 //
-// Important subtlety: when two STUN servers report the *same* mapping (the
-// hallmark of a real Cone NAT), ICE candidate deduplication (RFC 8445 §5.1.3)
-// legitimately collapses them into a single surviving candidate before
-// getStats() ever sees them — so "only 1 srflx candidate" is ambiguous
-// between "servers agreed" (Cone) and "a server never answered" (can't tell).
-// `icecandidateerror` is the only reliable per-server success/failure signal,
-// independent of candidate deduplication, so it's used here to count how many
-// *configured* STUN servers actually responded — not how many surviving
-// candidates ended up in the (already deduped) list.
-function classifyNatType(hostAddresses, stunBindings, stunConfiguredUrls, erroredStunUrls) {
-  if (stunConfiguredUrls.length === 0) {
+// `stunResults` is one entry per configured STUN server:
+//   { ok: true,  port }              -> produced a srflx binding
+//   { ok: false, timedOut: true }    -> errorCode >= 700 (no response)
+//   { ok: false, timedOut: false }   -> no binding and no timeout error; it may
+//                                       have answered with the SAME mapping as
+//                                       another server and been deduplicated
+//                                       (RFC 8445 §5.1.3), so we can't be sure.
+//
+// A responding server always produces a binding UNLESS it was deduped against
+// an identical mapping — which only happens when ports match (Cone). So distinct
+// ports across bindings can't be hidden by dedup: >=2 distinct ports is a
+// definitive Symmetric signal.
+function classifyNatType(hostAddresses, stunResults) {
+  if (stunResults.length === 0) {
     return { kind: 'na', label: 'N/A（LAN_ONLY，未設定 STUN）' };
   }
 
-  const respondedCount = stunConfiguredUrls.filter((u) => !erroredStunUrls.has(u)).length;
-
-  if (stunBindings.length === 0) {
+  const bindings = stunResults.filter((r) => r.ok);
+  if (bindings.length === 0) {
     return { kind: 'unknown', label: '無法判斷（STUN 逾時或 UDP 被封鎖）' };
   }
 
-  if (stunBindings.some((b) => hostAddresses.has(b.address))) {
+  if (bindings.some((b) => hostAddresses.has(b.address))) {
     return { kind: 'open', label: '公網 IP / 無 NAT' };
   }
 
-  if (respondedCount < 2) {
-    return {
-      kind: 'insufficient',
-      label: `樣本不足（僅 ${respondedCount} 個 STUN 伺服器回應，需 ≥2 個才能比對）`,
-    };
+  const distinctPorts = new Set(bindings.map((b) => b.port));
+  if (distinctPorts.size >= 2) {
+    return { kind: 'symmetric', label: 'Symmetric NAT（位址相依轉換）' };
   }
 
-  const distinctPorts = new Set(stunBindings.map((b) => b.port));
-  return distinctPorts.size === 1
-    ? { kind: 'cone', label: 'Cone-type NAT（可預測位址轉換）' }
-    : { kind: 'symmetric', label: 'Symmetric NAT（位址相依轉換）' };
+  // Exactly one external port observed. It's Cone only if a second server also
+  // participated (either its own binding, or it answered but was deduped —
+  // i.e. it did NOT time out). Servers that timed out don't count.
+  const participating = stunResults.filter((r) => r.ok || !r.timedOut).length;
+  if (participating >= 2) {
+    return { kind: 'cone', label: 'Cone-type NAT（可預測位址轉換）' };
+  }
+  const label =
+    stunResults.length < 2
+      ? '樣本不足（僅設定 1 台 STUN，需 ≥2 台才能比對；可設定 STUN_URLS）'
+      : `樣本不足（只有 ${bindings.length} 台 STUN 回應、其餘逾時，需 ≥2 台才能比對）`;
+  return { kind: 'insufficient', label };
 }
 
 export async function runDiagnostics(ctx) {
@@ -97,7 +149,13 @@ export async function runDiagnostics(ctx) {
     if (!ctx.ctrl || ctx.ctrl.readyState !== 'open') {
       await connect(ctx);
     }
-    await waitIceGatheringComplete(ctx.pc, 5000);
+    // Run the dedicated STUN probe in parallel with waiting for the main
+    // connection's gathering, so the two bounded waits overlap instead of
+    // adding up.
+    const [, probe] = await Promise.all([
+      waitIceGatheringComplete(ctx.pc, 5000),
+      gatherStunBindings(ctx.iceServers),
+    ]);
     const stats = await ctx.pc.getStats();
 
     const localCandidates = [];
@@ -134,18 +192,35 @@ export async function runDiagnostics(ctx) {
       };
     });
 
-    const stunBindings = localCandidates
-      .filter((c) => c.type === 'srflx')
-      .map((c) => ({ server: c.url || '(unknown)', address: c.address, port: c.port }));
+    // STUN bindings / NAT type come from the dedicated gather-only connection
+    // (`probe` above) — NOT from the main connection, whose STUN gathering gets
+    // curtailed once its host-host pair connects.
+    const bindingByServer = new Map();
+    probe.srflx.forEach((c) => {
+      if (!bindingByServer.has(c.url)) bindingByServer.set(c.url, { address: c.address, port: c.port });
+    });
+    const errorsByUrl = new Map();
+    probe.errors.forEach((e) => {
+      if (!errorsByUrl.has(e.url)) errorsByUrl.set(e.url, []);
+      errorsByUrl.get(e.url).push(e.errorCode);
+    });
 
-    const hostAddresses = new Set(localCandidates.filter((c) => c.type === 'host').map((c) => c.address));
-    const stunConfiguredUrls = (ctx.iceServers || [])
-      .map((s) => s.urls)
-      .filter((u) => String(u).startsWith('stun:'));
-    const erroredStunUrls = new Set((ctx.iceCandidateErrors || []).map((e) => e.url));
-    const natType = classifyNatType(hostAddresses, stunBindings, stunConfiguredUrls, erroredStunUrls);
+    // One row per configured STUN server so the UI shows exactly what each one
+    // did — a binding, a timeout/failure, or "no srflx (possibly deduped)".
+    const stunResults = probe.stunUrls.map((url) => {
+      const b = bindingByServer.get(url);
+      if (b) return { server: url, ok: true, address: b.address, port: b.port, status: '成功' };
+      const codes = errorsByUrl.get(url) || [];
+      const timedOut = codes.length > 0 && codes.every((c) => c >= STUN_NO_RESPONSE_CODE);
+      const status = codes.length
+        ? `失敗（errorCode ${[...new Set(codes)].join('/')}）`
+        : '無 srflx（可能與另一台相同而被去重，或未回應）';
+      return { server: url, ok: false, address: null, port: null, timedOut, status };
+    });
 
-    ctx.diagSetResult({ natType, stunBindings, localCandidates, remoteCandidates, pairs });
+    const natType = classifyNatType(probe.hostAddresses, stunResults);
+
+    ctx.diagSetResult({ natType, stunResults, localCandidates, remoteCandidates, pairs });
     ctx.diagSetStatus('done');
   } catch (e) {
     ctx.diagSetError(e.message);

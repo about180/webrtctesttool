@@ -129,16 +129,6 @@ export function connect(ctx) {
       pc.onicecandidate = (ev) => {
         if (ev.candidate) ws.send(JSON.stringify({ type: 'candidate', candidate: ev.candidate }));
       };
-      // Per-STUN/TURN-server failures (timeout, unreachable, ...). This is the
-      // only reliable way to know a configured STUN server didn't respond:
-      // when two servers return the *same* mapping (e.g. a real Cone NAT),
-      // ICE legitimately dedupes the resulting candidates down to one before
-      // getStats() ever sees them, so candidate counts alone can't tell
-      // "servers agreed" apart from "a server never answered".
-      ctx.iceCandidateErrors = [];
-      pc.onicecandidateerror = (ev) => {
-        ctx.iceCandidateErrors.push({ url: ev.url, errorCode: ev.errorCode, errorText: ev.errorText });
-      };
       pc.onconnectionstatechange = () => {
         const s = pc.connectionState;
         if (s === 'connected') ctx.setConn('已連線', 'connected');

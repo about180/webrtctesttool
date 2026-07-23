@@ -15,7 +15,7 @@ const EMPTY_DIAG = {
   status: 'idle', // idle | running | done | error
   error: null,
   natType: null,
-  stunBindings: [],
+  stunResults: [],
   localCandidates: [],
   remoteCandidates: [],
   pairs: [],
@@ -167,11 +167,19 @@ export default function App() {
             </div>
           )}
 
-          <details open={diag.stunBindings.length > 0}>
-            <summary>STUN Binding（{diag.stunBindings.length}）</summary>
+          <details open={diag.stunResults.length > 0}>
+            <summary>
+              STUN Binding（成功 {diag.stunResults.filter((r) => r.ok).length} / 共{' '}
+              {diag.stunResults.length}）
+            </summary>
             <DiagTable
-              columns={['STUN 伺服器', '對外 IP', '對外 Port']}
-              rows={diag.stunBindings.map((b) => [b.server, b.address, b.port])}
+              columns={['STUN 伺服器', '對外 IP', '對外 Port', '狀態']}
+              rows={diag.stunResults.map((r) => [
+                r.server,
+                r.ok ? r.address : '—',
+                r.ok ? r.port : '—',
+                r.status,
+              ])}
             />
           </details>
 
@@ -218,12 +226,13 @@ export default function App() {
           </details>
 
           <p className="diag-note">
-            NAT Type 為近似判斷（比對 ≥2 個 STUN 目標回傳的對外 port 是否一致），並非 RFC 3489
-            完整分類——公用 STUN 伺服器已不支援 CHANGE-REQUEST，瀏覽器也無法發送 raw STUN
-            封包做完整偵測。若其中一個 STUN 伺服器沒有回應（逾時而非快速失敗），瀏覽器可能整批
-            放棄該次 STUN 收集、不會回報任何 binding，此時會顯示「無法判斷」。另外，現代瀏覽器
-            預設會隱藏本機真實區網 IP（mDNS 隱私保護），故 Local Candidates 的 host 位址多半顯示
-            為空或 `.local` 名稱，屬正常現象。
+            NAT Type 為近似判斷（用一條專門的收集連線，比對 ≥2 個 STUN 伺服器從**同一個本機
+            通訊埠**回傳的對外 port 是否一致），並非 RFC 3489 完整分類——公用 STUN 伺服器已不
+            支援 CHANGE-REQUEST，瀏覽器也無法發送 raw STUN 封包做完整偵測。若兩台 STUN 回傳
+            相同的對外位址（Cone NAT 的典型現象），ICE 會把重複的 candidate 去重，因此上表可能
+            只看到 1 筆成功、另一台顯示「無 srflx（可能被去重）」——只要它沒有明確逾時，就會判為
+            Cone。另外，現代瀏覽器預設會用 mDNS 隱藏本機真實區網 IP，故 Local Candidates 的
+            host 位址多半顯示為空，屬正常現象。
           </p>
         </section>
       )}
