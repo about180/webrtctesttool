@@ -1,16 +1,34 @@
 'use strict';
 
 // ICE servers offered to both the werift peer and (via GET /config) the
-// browser. Defaults to a public STUN server; add a TURN server with the
-// TURN_URL / TURN_USERNAME / TURN_CREDENTIAL env vars for clients behind
-// symmetric NAT.
+// browser. Defaults to two public STUN servers (see below); add a TURN
+// server with the TURN_URL / TURN_USERNAME / TURN_CREDENTIAL env vars for
+// clients behind symmetric NAT.
+function buildStunUrls() {
+  // STUN_URLS (comma-separated) takes priority — lets an operator configure
+  // as many STUN targets as they want, e.g. for the NAT-type diagnostic.
+  if (process.env.STUN_URLS) {
+    return process.env.STUN_URLS.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  // STUN_URL (single value) is kept for backwards compatibility with earlier
+  // deployments — using just one target means the NAT-type diagnostic can't
+  // compare across STUN servers (it will report "insufficient samples").
+  if (process.env.STUN_URL) return [process.env.STUN_URL];
+
+  // Default: two independent public STUN providers. Besides giving the
+  // NAT-type diagnostic (≥2 targets needed to compare mapped ports) something
+  // to work with, this also makes ICE gathering more resilient — if one
+  // provider is unreachable, the other can still produce a srflx candidate.
+  return ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'];
+}
+
 function buildIceServers() {
   // Air-gapped / same-LAN deployments need no STUN or TURN at all: both peers
   // reach each other directly via host candidates. LAN_ONLY=1 returns an empty
   // list so nothing on the internet is ever contacted.
   if (/^(1|true|yes)$/i.test(process.env.LAN_ONLY || '')) return [];
 
-  const servers = [{ urls: process.env.STUN_URL || 'stun:stun.l.google.com:19302' }];
+  const servers = buildStunUrls().map((urls) => ({ urls }));
   if (process.env.TURN_URL) {
     servers.push({
       urls: process.env.TURN_URL,

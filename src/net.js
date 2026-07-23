@@ -106,7 +106,7 @@ async function fetchIceServers() {
   return [{ urls: 'stun:stun.l.google.com:19302' }];
 }
 
-function connect(ctx) {
+export function connect(ctx) {
   return new Promise((resolve, reject) => {
     ctx.setConn('連線中…', 'connecting');
     fetchIceServers().then((iceServers) => {
@@ -114,6 +114,9 @@ function connect(ctx) {
       const ws = new WebSocket(wsUrl());
       ctx.pc = pc;
       ctx.ws = ws;
+      // Stashed so diagnostics can tell "no STUN configured" (LAN_ONLY) apart
+      // from "STUN configured but no server responded".
+      ctx.iceServers = iceServers;
 
       // Browser is the initiator: create the channels up front.
       ctx.ctrl = pc.createDataChannel('ctrl', { ordered: true });
@@ -125,6 +128,16 @@ function connect(ctx) {
 
       pc.onicecandidate = (ev) => {
         if (ev.candidate) ws.send(JSON.stringify({ type: 'candidate', candidate: ev.candidate }));
+      };
+      // Per-STUN/TURN-server failures (timeout, unreachable, ...). This is the
+      // only reliable way to know a configured STUN server didn't respond:
+      // when two servers return the *same* mapping (e.g. a real Cone NAT),
+      // ICE legitimately dedupes the resulting candidates down to one before
+      // getStats() ever sees them, so candidate counts alone can't tell
+      // "servers agreed" apart from "a server never answered".
+      ctx.iceCandidateErrors = [];
+      pc.onicecandidateerror = (ev) => {
+        ctx.iceCandidateErrors.push({ url: ev.url, errorCode: ev.errorCode, errorText: ev.errorText });
       };
       pc.onconnectionstatechange = () => {
         const s = pc.connectionState;

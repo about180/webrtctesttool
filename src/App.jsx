@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { runAll, drawChart, selectedPath } from './net.js';
+import { runDiagnostics } from './diagnostics.js';
 
 const DURATIONS = [
   { value: 30, label: '30 秒' },
@@ -10,6 +11,16 @@ const DURATIONS = [
 
 const EMPTY_METRICS = { download: '—', upload: '—', latency: '—', jitter: '—', loss: '—' };
 
+const EMPTY_DIAG = {
+  status: 'idle', // idle | running | done | error
+  error: null,
+  natType: null,
+  stunBindings: [],
+  localCandidates: [],
+  remoteCandidates: [],
+  pairs: [],
+};
+
 export default function App() {
   const [duration, setDuration] = useState(30);
   const [tests, setTests] = useState({ latency: true, download: true, upload: true, udp: true });
@@ -19,6 +30,7 @@ export default function App() {
   const [metrics, setMetrics] = useState(EMPTY_METRICS);
   const [logLines, setLogLines] = useState([]);
   const [chartPoints, setChartPoints] = useState([]);
+  const [diag, setDiag] = useState(EMPTY_DIAG);
 
   const canvasRef = useRef(null);
   const logRef = useRef(null);
@@ -40,6 +52,9 @@ export default function App() {
       pushPoint: (test, val) => setChartPoints((pts) => pts.concat({ test, mbps: val })),
       resetMetrics: () => setMetrics(EMPTY_METRICS),
       setRunning,
+      diagSetStatus: (status) => setDiag((d) => ({ ...d, status })),
+      diagSetError: (error) => setDiag((d) => ({ ...d, error })),
+      diagSetResult: (result) => setDiag((d) => ({ ...d, ...result })),
     };
 
     // Diagnostics hook usable from the devtools console / e2e tests.
@@ -56,7 +71,9 @@ export default function App() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logLines]);
 
+  const busy = running || diag.status === 'running';
   const handleStart = () => runAll(ctxRef.current, duration, tests);
+  const handleDiagnose = () => runDiagnostics(ctxRef.current);
   const toggleTest = (key) => setTests((t) => ({ ...t, [key]: !t[key] }));
 
   return (
@@ -97,8 +114,11 @@ export default function App() {
               </label>
             </span>
           </label>
-          <button disabled={running} onClick={handleStart}>
+          <button disabled={busy} onClick={handleStart}>
             開始測試
+          </button>
+          <button className="secondary" disabled={busy} onClick={handleDiagnose}>
+            執行網路診斷
           </button>
         </div>
         <div className="status">
@@ -130,6 +150,84 @@ export default function App() {
         <pre ref={logRef}>{logLines.join('\n')}</pre>
       </section>
 
+      {diag.status !== 'idle' && (
+        <section className="diagnostics">
+          <div className="diag-head">
+            <span>網路診斷（ICE / STUN / NAT）</span>
+            {diag.status === 'running' && <span className="phase">診斷中…</span>}
+            {diag.status === 'error' && <span className="phase">錯誤：{diag.error}</span>}
+          </div>
+
+          {diag.natType && (
+            <div className="metric">
+              <div className="metric-label">NAT Type（近似判斷）</div>
+              <div className="metric-value">
+                <span className={'nat-badge nat-' + diag.natType.kind}>{diag.natType.label}</span>
+              </div>
+            </div>
+          )}
+
+          <details open={diag.stunBindings.length > 0}>
+            <summary>STUN Binding（{diag.stunBindings.length}）</summary>
+            <DiagTable
+              columns={['STUN 伺服器', '對外 IP', '對外 Port']}
+              rows={diag.stunBindings.map((b) => [b.server, b.address, b.port])}
+            />
+          </details>
+
+          <details>
+            <summary>Local Candidates（{diag.localCandidates.length}）</summary>
+            <CandidateTable candidates={diag.localCandidates} />
+          </details>
+
+          <details>
+            <summary>Remote Candidates（{diag.remoteCandidates.length}）</summary>
+            <CandidateTable candidates={diag.remoteCandidates} />
+          </details>
+
+          <details open>
+            <summary>Candidate Pairs（{diag.pairs.length}）</summary>
+            <div className="table-scroll">
+              <table className="diag-table">
+                <thead>
+                  <tr>
+                    <th>Local</th>
+                    <th>Remote</th>
+                    <th>狀態</th>
+                    <th>Nominated</th>
+                    <th>RTT (ms)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {diag.pairs.map((p, i) => (
+                    <tr key={i} className={p.state === 'succeeded' ? 'pair-selected' : ''}>
+                      <td>
+                        {p.localAddr}:{p.localPort}
+                      </td>
+                      <td>
+                        {p.remoteAddr}:{p.remotePort}
+                      </td>
+                      <td>{p.state}</td>
+                      <td>{p.nominated ? '✓' : ''}</td>
+                      <td>{p.rtt ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+
+          <p className="diag-note">
+            NAT Type 為近似判斷（比對 ≥2 個 STUN 目標回傳的對外 port 是否一致），並非 RFC 3489
+            完整分類——公用 STUN 伺服器已不支援 CHANGE-REQUEST，瀏覽器也無法發送 raw STUN
+            封包做完整偵測。若其中一個 STUN 伺服器沒有回應（逾時而非快速失敗），瀏覽器可能整批
+            放棄該次 STUN 收集、不會回報任何 binding，此時會顯示「無法判斷」。另外，現代瀏覽器
+            預設會隱藏本機真實區網 IP（mDNS 隱私保護），故 Local Candidates 的 host 位址多半顯示
+            為空或 `.local` 名稱，屬正常現象。
+          </p>
+        </section>
+      )}
+
       <footer>
         <details>
           <summary>為什麼不是「真的」iperf？</summary>
@@ -154,6 +252,68 @@ function Metric({ label, value, unit }) {
       <div className="metric-value">
         <span>{value}</span> <small>{unit}</small>
       </div>
+    </div>
+  );
+}
+
+function DiagTable({ columns, rows }) {
+  if (rows.length === 0) return <p className="diag-empty">（無）</p>;
+  return (
+    <div className="table-scroll">
+      <table className="diag-table">
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c}>{c}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i}>
+              {r.map((v, j) => (
+                <td key={j}>{v}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function CandidateTable({ candidates }) {
+  if (candidates.length === 0) return <p className="diag-empty">（無）</p>;
+  return (
+    <div className="table-scroll">
+      <table className="diag-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Protocol</th>
+            <th>Address</th>
+            <th>Port</th>
+            <th>Priority</th>
+            <th>Foundation</th>
+            <th>Related</th>
+            <th>Server</th>
+          </tr>
+        </thead>
+        <tbody>
+          {candidates.map((c) => (
+            <tr key={c.id}>
+              <td>{c.type}</td>
+              <td>{c.protocol}</td>
+              <td>{c.address}</td>
+              <td>{c.port}</td>
+              <td>{c.priority}</td>
+              <td>{c.foundation || '—'}</td>
+              <td>{c.relatedAddress ? `${c.relatedAddress}:${c.relatedPort}` : '—'}</td>
+              <td>{c.url || '—'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

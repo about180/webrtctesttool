@@ -86,6 +86,12 @@ button.ghost {
   font-weight: 500;
   margin: 0;
 }
+button.secondary {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  margin-left: 8px;
+}
 
 .status {
   margin-top: 14px;
@@ -151,3 +157,65 @@ canvas { width: 100%; height: auto; display: block; }
 footer { margin-top: 26px; color: var(--muted); font-size: 0.85rem; }
 footer code { background: var(--panel-2); padding: 1px 5px; border-radius: 4px; }
 summary { cursor: pointer; }
+
+.diagnostics {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.diag-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.diagnostics details {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.diagnostics summary {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.diag-empty { color: var(--muted); font-size: 0.85rem; margin: 8px 0 0; }
+.diag-note { color: var(--muted); font-size: 0.78rem; margin: 0; }
+
+.nat-badge {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 1rem;
+  font-weight: 700;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+.nat-badge.nat-open, .nat-badge.nat-cone { color: #04101f; background: var(--accent-2); border-color: var(--accent-2); }
+.nat-badge.nat-symmetric { color: #04101f; background: var(--warn); border-color: var(--warn); }
+.nat-badge.nat-unknown, .nat-badge.nat-na, .nat-badge.nat-insufficient { color: var(--muted); }
+
+.table-scroll { overflow-x: auto; margin-top: 8px; }
+.diag-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+.diag-table th, .diag-table td {
+  text-align: left;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.diag-table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", sans-serif;
+}
+.diag-table tr.pair-selected { background: rgba(53, 208, 165, 0.12); }
+.diag-table tr.pair-selected td:first-child { border-left: 2px solid var(--accent-2); }
