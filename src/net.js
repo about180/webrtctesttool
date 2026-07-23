@@ -108,7 +108,7 @@ async function fetchIceServers() {
 
 export function connect(ctx) {
   return new Promise((resolve, reject) => {
-    ctx.setConn('連線中…', 'connecting');
+    ctx.setConn('Connecting…', 'connecting');
     fetchIceServers().then((iceServers) => {
       const pc = new RTCPeerConnection({ iceServers });
       const ws = new WebSocket(wsUrl());
@@ -131,8 +131,8 @@ export function connect(ctx) {
       };
       pc.onconnectionstatechange = () => {
         const s = pc.connectionState;
-        if (s === 'connected') ctx.setConn('已連線', 'connected');
-        else if (s === 'failed' || s === 'disconnected') ctx.setConn('連線失敗', 'failed');
+        if (s === 'connected') ctx.setConn('Connected', 'connected');
+        else if (s === 'failed' || s === 'disconnected') ctx.setConn('Connection failed', 'failed');
       };
 
       ws.onopen = async () => {
@@ -156,7 +156,7 @@ export function connect(ctx) {
 
       // Resolve when the control channel is usable.
       ctx.ctrl.onopen = () => resolve();
-      setTimeout(() => reject(new Error('連線逾時')), 15000);
+      setTimeout(() => reject(new Error('Connection timed out')), 15000);
     });
   });
 }
@@ -216,7 +216,7 @@ function blast(channel, durationMs, fill) {
 // ---- tests ----------------------------------------------------------------
 
 async function testLatency(ctx) {
-  ctx.setPhase('測試延遲…');
+  ctx.setPhase('Testing latency…');
   const rtts = [];
   const N = 20;
   for (let seq = 0; seq < N; seq++) {
@@ -236,7 +236,7 @@ async function testLatency(ctx) {
   }
   offCtrlType(ctx, 'pong');
   if (rtts.length === 0) {
-    ctx.pushLog('latency: 無回應');
+    ctx.pushLog('latency: no response');
     return;
   }
   const min = Math.min(...rtts);
@@ -253,14 +253,14 @@ async function testLatency(ctx) {
 }
 
 async function testDownload(ctx, duration) {
-  ctx.setPhase('測試下載…');
+  ctx.setPhase('Testing download…');
   return receiveThroughput(ctx, 'download', ctx.data, duration, () => {
     sendCtrl(ctx, { t: 'start', test: 'download', duration });
   });
 }
 
 async function testUpload(ctx, duration) {
-  ctx.setPhase('測試上傳…');
+  ctx.setPhase('Testing upload…');
   // Server is the receiver; it streams back interval + summary reports.
   let intervalCount = 0;
   onCtrlType(ctx, 'interval:upload', (m) => {
@@ -287,12 +287,12 @@ async function testUpload(ctx, duration) {
     ctx.setMetric('upload', fmt(m.mbps));
     ctx.pushLog(`upload: ${fmt(m.mbps)} Mbps (${fmt(m.bytes / 1e6)} MB in ${fmt(m.seconds)} s)`);
   } else {
-    ctx.pushLog('upload: 未收到伺服器總結');
+    ctx.pushLog('upload: no summary received from server');
   }
 }
 
 async function testUdp(ctx, duration) {
-  ctx.setPhase('測試 UDP 丟包 / jitter…');
+  ctx.setPhase('Testing UDP loss / jitter…');
   let received = 0;
   let bytes = 0;
   let maxSeq = -1;
@@ -356,7 +356,7 @@ async function testUdp(ctx, duration) {
   // don't overwrite the latency-based jitter unless UDP produced a value
   if (received > 1) ctx.setMetric('jitter', fmt(jitter));
   ctx.pushLog(
-    `udp: ${fmt(rate)} Mbps, 收到 ${received}/${sent} 個封包, 丟包 ${fmt(loss)}%, jitter ${fmt(jitter)} ms`
+    `udp: ${fmt(rate)} Mbps, received ${received}/${sent} packets, loss ${fmt(loss)}%, jitter ${fmt(jitter)} ms`
   );
 }
 
@@ -436,10 +436,10 @@ export async function runAll(ctx, duration, tests) {
     if (tests.download) await testDownload(ctx, duration);
     if (tests.upload) await testUpload(ctx, duration);
     if (tests.udp) await testUdp(ctx, duration);
-    ctx.setPhase('完成 ✓');
+    ctx.setPhase('Done ✓');
   } catch (e) {
-    ctx.setPhase('錯誤：' + e.message);
-    ctx.setConn('連線失敗', 'failed');
+    ctx.setPhase('Error: ' + e.message);
+    ctx.setConn('Connection failed', 'failed');
     ctx.pushLog('error: ' + e.message);
   } finally {
     ctx.setRunning(false);

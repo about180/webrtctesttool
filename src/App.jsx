@@ -3,10 +3,10 @@ import { runAll, drawChart, selectedPath } from './net.js';
 import { runDiagnostics } from './diagnostics.js';
 
 const DURATIONS = [
-  { value: 30, label: '30 秒' },
-  { value: 60, label: '1 分鐘' },
-  { value: 180, label: '3 分鐘' },
-  { value: 300, label: '5 分鐘' },
+  { value: 30, label: '30 sec' },
+  { value: 60, label: '1 min' },
+  { value: 180, label: '3 min' },
+  { value: 300, label: '5 min' },
 ];
 
 const EMPTY_METRICS = { download: '—', upload: '—', latency: '—', jitter: '—', loss: '—' };
@@ -25,7 +25,7 @@ export default function App() {
   const [duration, setDuration] = useState(30);
   const [tests, setTests] = useState({ latency: true, download: true, upload: true, udp: true });
   const [running, setRunning] = useState(false);
-  const [conn, setConnState] = useState({ text: '未連線', cls: '' });
+  const [conn, setConnState] = useState({ text: 'Not connected', cls: '' });
   const [phase, setPhase] = useState('');
   const [metrics, setMetrics] = useState(EMPTY_METRICS);
   const [logLines, setLogLines] = useState([]);
@@ -79,16 +79,16 @@ export default function App() {
   return (
     <main>
       <header>
-        <h1>WebRTC 網路測試工具</h1>
+        <h1>WebRTC Network Test Tool</h1>
         <p className="subtitle">
-          瀏覽器 ↔ 伺服器的 iperf 式吞吐量 / 延遲測試，走 WebRTC DataChannel。
+          iperf-style throughput / latency test between browser and server over WebRTC DataChannel.
         </p>
       </header>
 
       <section className="controls">
         <div className="row">
           <label>
-            測試時長
+            Test duration
             <select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
               {DURATIONS.map((d) => (
                 <option key={d.value} value={d.value}>
@@ -98,42 +98,42 @@ export default function App() {
             </select>
           </label>
           <label className="tests">
-            測試項目
+            Tests
             <span className="checks">
               <label>
-                <input type="checkbox" checked={tests.latency} onChange={() => toggleTest('latency')} /> 延遲
+                <input type="checkbox" checked={tests.latency} onChange={() => toggleTest('latency')} /> Latency
               </label>
               <label>
-                <input type="checkbox" checked={tests.download} onChange={() => toggleTest('download')} /> 下載
+                <input type="checkbox" checked={tests.download} onChange={() => toggleTest('download')} /> Download
               </label>
               <label>
-                <input type="checkbox" checked={tests.upload} onChange={() => toggleTest('upload')} /> 上傳
+                <input type="checkbox" checked={tests.upload} onChange={() => toggleTest('upload')} /> Upload
               </label>
               <label>
-                <input type="checkbox" checked={tests.udp} onChange={() => toggleTest('udp')} /> UDP 丟包
+                <input type="checkbox" checked={tests.udp} onChange={() => toggleTest('udp')} /> UDP loss
               </label>
             </span>
           </label>
           <button disabled={busy} onClick={handleStart}>
-            開始測試
+            Start test
           </button>
           <button className="secondary" disabled={busy} onClick={handleDiagnose}>
-            執行網路診斷
+            Run network diagnostics
           </button>
         </div>
         <div className="status">
-          <span>連線狀態：</span>
+          <span>Connection:</span>
           <span className={'badge' + (conn.cls ? ' ' + conn.cls : '')}>{conn.text}</span>
           <span className="phase">{phase}</span>
         </div>
       </section>
 
       <section className="results">
-        <Metric label="下載" value={metrics.download} unit="Mbps" />
-        <Metric label="上傳" value={metrics.upload} unit="Mbps" />
-        <Metric label="延遲 (RTT)" value={metrics.latency} unit="ms" />
+        <Metric label="Download" value={metrics.download} unit="Mbps" />
+        <Metric label="Upload" value={metrics.upload} unit="Mbps" />
+        <Metric label="Latency (RTT)" value={metrics.latency} unit="ms" />
         <Metric label="Jitter" value={metrics.jitter} unit="ms" />
-        <Metric label="UDP 丟包" value={metrics.loss} unit="%" />
+        <Metric label="UDP loss" value={metrics.loss} unit="%" />
       </section>
 
       <section className="chart-wrap">
@@ -142,9 +142,9 @@ export default function App() {
 
       <section className="log-wrap">
         <div className="log-head">
-          <span>每秒統計（模仿 iperf）</span>
+          <span>Per-second stats (iperf-style)</span>
           <button className="ghost" onClick={() => setLogLines([])}>
-            清除
+            Clear
           </button>
         </div>
         <pre ref={logRef}>{logLines.join('\n')}</pre>
@@ -153,14 +153,14 @@ export default function App() {
       {diag.status !== 'idle' && (
         <section className="diagnostics">
           <div className="diag-head">
-            <span>網路診斷（ICE / STUN / NAT）</span>
-            {diag.status === 'running' && <span className="phase">診斷中…</span>}
-            {diag.status === 'error' && <span className="phase">錯誤：{diag.error}</span>}
+            <span>Network diagnostics (ICE / STUN / NAT)</span>
+            {diag.status === 'running' && <span className="phase">Diagnosing…</span>}
+            {diag.status === 'error' && <span className="phase">Error: {diag.error}</span>}
           </div>
 
           {diag.natType && (
             <div className="metric">
-              <div className="metric-label">NAT Type（近似判斷）</div>
+              <div className="metric-label">NAT Type (approximate)</div>
               <div className="metric-value">
                 <span className={'nat-badge nat-' + diag.natType.kind}>{diag.natType.label}</span>
               </div>
@@ -169,11 +169,11 @@ export default function App() {
 
           <details open={diag.stunResults.length > 0}>
             <summary>
-              STUN Binding（成功 {diag.stunResults.filter((r) => r.ok).length} / 共{' '}
-              {diag.stunResults.length}）
+              STUN Binding (OK {diag.stunResults.filter((r) => r.ok).length} / of{' '}
+              {diag.stunResults.length})
             </summary>
             <DiagTable
-              columns={['STUN 伺服器', '對外 IP', '對外 Port', '狀態']}
+              columns={['STUN server', 'External IP', 'External Port', 'Status']}
               rows={diag.stunResults.map((r) => [
                 r.server,
                 r.ok ? r.address : '—',
@@ -184,24 +184,24 @@ export default function App() {
           </details>
 
           <details>
-            <summary>Local Candidates（{diag.localCandidates.length}）</summary>
+            <summary>Local Candidates ({diag.localCandidates.length})</summary>
             <CandidateTable candidates={diag.localCandidates} />
           </details>
 
           <details>
-            <summary>Remote Candidates（{diag.remoteCandidates.length}）</summary>
+            <summary>Remote Candidates ({diag.remoteCandidates.length})</summary>
             <CandidateTable candidates={diag.remoteCandidates} />
           </details>
 
           <details open>
-            <summary>Candidate Pairs（{diag.pairs.length}）</summary>
+            <summary>Candidate Pairs ({diag.pairs.length})</summary>
             <div className="table-scroll">
               <table className="diag-table">
                 <thead>
                   <tr>
                     <th>Local</th>
                     <th>Remote</th>
-                    <th>狀態</th>
+                    <th>State</th>
                     <th>Nominated</th>
                     <th>RTT (ms)</th>
                   </tr>
@@ -226,27 +226,30 @@ export default function App() {
           </details>
 
           <p className="diag-note">
-            NAT Type 為近似判斷（用一條專門的收集連線，比對 ≥2 個 STUN 伺服器從**同一個本機
-            通訊埠**回傳的對外 port 是否一致），並非 RFC 3489 完整分類——公用 STUN 伺服器已不
-            支援 CHANGE-REQUEST，瀏覽器也無法發送 raw STUN 封包做完整偵測。若兩台 STUN 回傳
-            相同的對外位址（Cone NAT 的典型現象），ICE 會把重複的 candidate 去重，因此上表可能
-            只看到 1 筆成功、另一台顯示「無 srflx（可能被去重）」——只要它沒有明確逾時，就會判為
-            Cone。另外，現代瀏覽器預設會用 mDNS 隱藏本機真實區網 IP，故 Local Candidates 的
-            host 位址多半顯示為空，屬正常現象。
+            NAT Type is approximate (a dedicated gathering-only connection compares whether ≥2 STUN
+            servers report the same external port from the <em>same local port</em>); it is not the
+            full RFC 3489 classification — public STUN servers no longer support CHANGE-REQUEST, and a
+            browser can't send raw STUN packets to do a complete probe. When two STUN servers return
+            the same external address (typical of a Cone NAT), ICE deduplicates the redundant
+            candidate, so the table above may show only 1 success while the other reads
+            &ldquo;No srflx (possibly deduped)&rdquo; — as long as it didn't clearly time out, that's
+            classified as Cone. Also, modern browsers hide the real local LAN IP via mDNS by default,
+            so the host address in Local Candidates is usually blank, which is normal.
           </p>
         </section>
       )}
 
       <footer>
         <details>
-          <summary>為什麼不是「真的」iperf？</summary>
+          <summary>Why isn't this "real" iperf?</summary>
           <p>
-            瀏覽器沙箱不允許網頁存取原始 TCP/UDP socket，所以無法在頁面裡執行原生
-            <code>iperf</code>/<code>iperf3</code> 執行檔（即使編成 WebAssembly 也拿不到 socket）。
-            這個工具改用 <strong>WebRTC DataChannel</strong>（SCTP over DTLS over UDP）在
-            你的瀏覽器與伺服器之間傳資料，量測結果反映的是「你這台瀏覽器到伺服器」的真實連線。
-            下載/上傳走可靠、有序的 channel（類似 iperf 的 TCP 模式）；UDP 丟包測試走
-            不可靠、免重傳的 channel（類似 iperf 的 UDP 模式）。
+            The browser sandbox doesn't allow web pages to access raw TCP/UDP sockets, so native
+            <code>iperf</code>/<code>iperf3</code> binaries can't run on a page (even compiled to
+            WebAssembly they can't get a socket). This tool instead uses a{' '}
+            <strong>WebRTC DataChannel</strong> (SCTP over DTLS over UDP) to move data between your
+            browser and the server, so the measurement reflects the real connection from your browser
+            to the server. Download/upload use a reliable, ordered channel (like iperf's TCP mode);
+            the UDP loss test uses an unreliable, no-retransmit channel (like iperf's UDP mode).
           </p>
         </details>
       </footer>
@@ -266,7 +269,7 @@ function Metric({ label, value, unit }) {
 }
 
 function DiagTable({ columns, rows }) {
-  if (rows.length === 0) return <p className="diag-empty">（無）</p>;
+  if (rows.length === 0) return <p className="diag-empty">(none)</p>;
   return (
     <div className="table-scroll">
       <table className="diag-table">
@@ -292,7 +295,7 @@ function DiagTable({ columns, rows }) {
 }
 
 function CandidateTable({ candidates }) {
-  if (candidates.length === 0) return <p className="diag-empty">（無）</p>;
+  if (candidates.length === 0) return <p className="diag-empty">(none)</p>;
   return (
     <div className="table-scroll">
       <table className="diag-table">

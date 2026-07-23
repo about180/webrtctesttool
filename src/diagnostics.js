@@ -111,21 +111,21 @@ const STUN_NO_RESPONSE_CODE = 700;
 // definitive Symmetric signal.
 function classifyNatType(hostAddresses, stunResults) {
   if (stunResults.length === 0) {
-    return { kind: 'na', label: 'N/A（LAN_ONLY，未設定 STUN）' };
+    return { kind: 'na', label: 'N/A (LAN_ONLY, no STUN configured)' };
   }
 
   const bindings = stunResults.filter((r) => r.ok);
   if (bindings.length === 0) {
-    return { kind: 'unknown', label: '無法判斷（STUN 逾時或 UDP 被封鎖）' };
+    return { kind: 'unknown', label: 'Undetermined (STUN timed out or UDP blocked)' };
   }
 
   if (bindings.some((b) => hostAddresses.has(b.address))) {
-    return { kind: 'open', label: '公網 IP / 無 NAT' };
+    return { kind: 'open', label: 'Public IP / no NAT' };
   }
 
   const distinctPorts = new Set(bindings.map((b) => b.port));
   if (distinctPorts.size >= 2) {
-    return { kind: 'symmetric', label: 'Symmetric NAT（位址相依轉換）' };
+    return { kind: 'symmetric', label: 'Symmetric NAT (address-dependent mapping)' };
   }
 
   // Exactly one external port observed. It's Cone only if a second server also
@@ -133,12 +133,12 @@ function classifyNatType(hostAddresses, stunResults) {
   // i.e. it did NOT time out). Servers that timed out don't count.
   const participating = stunResults.filter((r) => r.ok || !r.timedOut).length;
   if (participating >= 2) {
-    return { kind: 'cone', label: 'Cone-type NAT（可預測位址轉換）' };
+    return { kind: 'cone', label: 'Cone-type NAT (predictable mapping)' };
   }
   const label =
     stunResults.length < 2
-      ? '樣本不足（僅設定 1 台 STUN，需 ≥2 台才能比對；可設定 STUN_URLS）'
-      : `樣本不足（只有 ${bindings.length} 台 STUN 回應、其餘逾時，需 ≥2 台才能比對）`;
+      ? 'Insufficient samples (only 1 STUN configured; need ≥2 to compare — set STUN_URLS)'
+      : `Insufficient samples (only ${bindings.length} STUN server(s) responded, the rest timed out; need ≥2 to compare)`;
   return { kind: 'insufficient', label };
 }
 
@@ -209,12 +209,12 @@ export async function runDiagnostics(ctx) {
     // did — a binding, a timeout/failure, or "no srflx (possibly deduped)".
     const stunResults = probe.stunUrls.map((url) => {
       const b = bindingByServer.get(url);
-      if (b) return { server: url, ok: true, address: b.address, port: b.port, status: '成功' };
+      if (b) return { server: url, ok: true, address: b.address, port: b.port, status: 'OK' };
       const codes = errorsByUrl.get(url) || [];
       const timedOut = codes.length > 0 && codes.every((c) => c >= STUN_NO_RESPONSE_CODE);
       const status = codes.length
-        ? `失敗（errorCode ${[...new Set(codes)].join('/')}）`
-        : '無 srflx（可能與另一台相同而被去重，或未回應）';
+        ? `Failed (errorCode ${[...new Set(codes)].join('/')})`
+        : 'No srflx (possibly deduped against another server, or no response)';
       return { server: url, ok: false, address: null, port: null, timedOut, status };
     });
 
