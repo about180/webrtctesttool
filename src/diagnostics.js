@@ -37,7 +37,7 @@ export function waitIceGatheringComplete(pc, timeoutMs = 5000) {
 // servers share the same local candidate base here, which is exactly what
 // makes the mapped-port comparison a valid Cone-vs-Symmetric signal.
 export async function gatherStunBindings(iceServers, timeoutMs = 5000) {
-  const stunServers = (iceServers || []).filter((s) => String(s.urls).startsWith('stun:'));
+  const stunServers = (iceServers || []).filter((s) => /^stuns?:/.test(String(s.urls)));
   if (stunServers.length === 0) return { srflx: [], hostAddresses: new Set(), errors: [], stunUrls: [] };
 
   const pc = new RTCPeerConnection({ iceServers: stunServers });

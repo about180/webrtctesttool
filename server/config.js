@@ -15,11 +15,20 @@ function buildStunUrls() {
   // compare across STUN servers (it will report "insufficient samples").
   if (process.env.STUN_URL) return [process.env.STUN_URL];
 
-  // Default: two independent public STUN providers. Besides giving the
-  // NAT-type diagnostic (≥2 targets needed to compare mapped ports) something
-  // to work with, this also makes ICE gathering more resilient — if one
-  // provider is unreachable, the other can still produce a srflx candidate.
-  return ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'];
+  // Default public STUN targets. Multiple entries give the NAT-type diagnostic
+  // (≥2 targets needed to compare mapped ports) something to work with, and
+  // make ICE gathering more resilient — if one target is unreachable, another
+  // can still produce a srflx candidate.
+  //
+  // Note: stun.l.google.com's ports all resolve to the same IP, so for the
+  // Symmetric-vs-Cone comparison the Cloudflare entry (a different IP) is the
+  // more useful second data point. Override the whole list with STUN_URLS.
+  return [
+    'stun:stun.l.google.com:19302',
+    'stun:stun.l.google.com:3478',
+    'stuns:stun.l.google.com:5349',
+    'stun:stun.cloudflare.com:3478',
+  ];
 }
 
 function buildIceServers() {
